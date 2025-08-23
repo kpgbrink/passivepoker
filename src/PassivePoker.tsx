@@ -530,7 +530,7 @@ export default function PassivePoker() {
   const [volume, setVolume] = useState(0.6);
   const [showWinnerHL, setShowWinnerHL] = useState(true);
   const [showLeaderHL, setShowLeaderHL] = useState(true);
-  const [useScoreTarget, setUseScoreTarget] = useState(false);
+  const [useScoreTarget, setUseScoreTarget] = useState(true);
   const [scoreTarget, setScoreTarget] = useState(10);
   const [championId, setChampionId] = useState<string | null>(null);
   const [championRevealAt, setChampionRevealAt] = useState<number | null>(null);
