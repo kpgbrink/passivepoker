@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* small baseline so your layout fills the screen */
+html, body, #root { height: 100%; }
