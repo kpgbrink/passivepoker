@@ -335,86 +335,101 @@ class SoundEngine {
     osc.start(t);
     osc.stop(t + d + r + 0.02);
   }
+  // scale + note memory
+  private _scaleHz: number[] = [220, 247, 294, 330, 392]; // A minor pentatonic
+  private _noteIndex = 0;
+  private _lastNoteHz = this._scaleHz[0];
+
+  private _nextNoteHz(): number {
+    // biased random walk so notes feel related
+    const step = [-1, 0, 1][Math.floor(Math.random() * 3)];
+    this._noteIndex = Math.max(
+      0,
+      Math.min(this._scaleHz.length - 1, this._noteIndex + step)
+    );
+    this._lastNoteHz = this._scaleHz[this._noteIndex];
+    return this._lastNoteHz;
+  }
+
   deal() {
     this.ensure();
     if (!this.on || !this.ctx || !this.gain) return;
-    const t = this.ctx.currentTime;
-    // slight randomness for natural variation
-    const panVal = Math.random() * 0.8 - 0.4;
-    const durNoise = 0.08 + Math.random() * 0.03;
-    const snapStart = t + 0.002;
 
-    // Optional stereo panner
+    const t = this.ctx.currentTime;
+    const panVal = Math.random() * 0.8 - 0.4;
+
+    // Optional Stereo Panner
     // @ts-ignore
     const pan: StereoPannerNode | null = (this.ctx as any).createStereoPanner
       ? (this.ctx as any).createStereoPanner()
       : null;
     if (pan) pan.pan.setValueAtTime(panVal, t);
 
-    // Paper "swish": band-passed noise burst
+    // --- Master gain for this whole deal sound ---
+    const gMaster = this.ctx.createGain();
+    gMaster.gain.value = 0.1; // 🔉 adjust here to make louder/quieter
+    if (pan) pan.connect(gMaster).connect(this.out());
+    else gMaster.connect(this.out());
+
+    // --- Swish noise ---
     const sr = this.ctx.sampleRate;
+    const durNoise = 0.1;
     const buffer = this.ctx.createBuffer(1, Math.floor(sr * durNoise), sr);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
-      const x = Math.random() * 2 - 1;
-      const env = 1 - i / data.length; // quick decay
-      data[i] = x * env;
+      const env = 1 - i / data.length;
+      data[i] = (Math.random() * 2 - 1) * env;
     }
     const noise = this.ctx.createBufferSource();
     noise.buffer = buffer;
     const bp = this.ctx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.setValueAtTime(3200 + Math.random() * 1200, t);
-    bp.Q.setValueAtTime(1.2, t);
-    const hp = this.ctx.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.setValueAtTime(700, t);
-    const g1 = this.ctx.createGain();
-    g1.gain.setValueAtTime(0.0001, t);
-    g1.gain.exponentialRampToValueAtTime(0.9, t + 0.006);
-    g1.gain.exponentialRampToValueAtTime(0.0001, t + durNoise);
-    if (pan)
-      noise
-        .connect(bp)
-        .connect(hp)
-        .connect(g1)
-        .connect(pan)
-        .connect(this.out());
-    else noise.connect(bp).connect(hp).connect(g1).connect(this.out());
+    bp.frequency.value = 2000 + Math.random() * 1000;
+
+    const gNoise = this.ctx.createGain();
+    gNoise.gain.setValueAtTime(0.001, t);
+    gNoise.gain.exponentialRampToValueAtTime(0.2, t + 0.01);
+    gNoise.gain.exponentialRampToValueAtTime(0.001, t + durNoise);
+
+    noise
+      .connect(bp)
+      .connect(gNoise)
+      .connect(pan ?? gMaster);
     noise.start(t);
     noise.stop(t + durNoise + 0.02);
 
-    // Snap: short pitch-down chirp
-    const snap = this.ctx.createOscillator();
-    snap.type = "triangle";
-    snap.frequency.setValueAtTime(1500 + Math.random() * 400, snapStart);
-    snap.frequency.exponentialRampToValueAtTime(
-      650 + Math.random() * 150,
-      snapStart + 0.07
-    );
-    const g2 = this.ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, snapStart);
-    g2.gain.exponentialRampToValueAtTime(0.4, snapStart + 0.004);
-    g2.gain.exponentialRampToValueAtTime(0.0001, snapStart + 0.09);
-    if (pan) snap.connect(g2).connect(pan).connect(this.out());
-    else snap.connect(g2).connect(this.out());
-    snap.start(snapStart);
-    snap.stop(snapStart + 0.12);
+    // --- Musical pluck ---
+    const noteHz = this._nextNoteHz();
+    const pluck = this.ctx.createOscillator();
+    pluck.type = "triangle";
+    pluck.frequency.setValueAtTime(noteHz * 1.5, t);
+    pluck.frequency.exponentialRampToValueAtTime(noteHz, t + 0.1);
 
-    // Table thump: very short low sine
+    const gPluck = this.ctx.createGain();
+    gPluck.gain.setValueAtTime(0.001, t);
+    gPluck.gain.exponentialRampToValueAtTime(0.15, t + 0.01);
+    gPluck.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+
+    pluck.connect(gPluck).connect(pan ?? gMaster);
+    pluck.start(t);
+    pluck.stop(t + 0.1);
+
+    // --- Soft thump ---
     const th = this.ctx.createOscillator();
     th.type = "sine";
-    th.frequency.setValueAtTime(190, t);
-    th.frequency.exponentialRampToValueAtTime(120, t + 0.05);
-    const g3 = this.ctx.createGain();
-    g3.gain.setValueAtTime(0.0001, t);
-    g3.gain.exponentialRampToValueAtTime(0.2, t + 0.006);
-    g3.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
-    if (pan) th.connect(g3).connect(pan).connect(this.out());
-    else th.connect(g3).connect(this.out());
+    th.frequency.setValueAtTime(120, t);
+    th.frequency.exponentialRampToValueAtTime(80, t + 0.08);
+
+    const gTh = this.ctx.createGain();
+    gTh.gain.setValueAtTime(0.001, t);
+    gTh.gain.exponentialRampToValueAtTime(0.07, t + 0.01);
+    gTh.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+
+    th.connect(gTh).connect(pan ?? gMaster);
     th.start(t);
-    th.stop(t + 0.1);
+    th.stop(t + 0.12);
   }
+
   flip() {
     this.tone(660, 0.08, "sawtooth", 0.004, 0.06);
   }
@@ -999,53 +1014,70 @@ export default function PassivePoker() {
               ))}
             </div>
 
-            {lastWinners.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mt-4 text-sm">
-                <span className="font-semibold">
-                  Winner{lastWinners.length > 1 ? "s" : ""}:
-                </span>{" "}
-                {lastWinners.join(", ")}
-              </motion.div>
-            )}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: lastWinners.length > 0 ? 1 : 0, y: 0 }}
+              style={{
+                visibility: lastWinners.length > 0 ? "visible" : "hidden",
+              }}
+              className="mt-4 text-sm">
+              <span className="font-semibold">
+                Winner{lastWinners.length > 1 ? "s" : ""}:
+              </span>{" "}
+              {lastWinners.join(", ")}
+            </motion.div>
 
-            {phase === "showdown" && nextRoundAt && nextRoundDuration && (
-              <div className="mt-3">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{
+                opacity:
+                  phase === "showdown" && nextRoundAt && nextRoundDuration
+                    ? 1
+                    : 0,
+              }}
+              transition={{ duration: 4 }} // fade in/out over 1s
+              style={{
+                visibility:
+                  phase === "showdown" && nextRoundAt && nextRoundDuration
+                    ? "visible"
+                    : "hidden",
+              }}
+              className="mt-3">
+              <div
+                className="w-full h-2 rounded-full bg-gray-200 overflow-hidden"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}>
                 <div
-                  className="w-full h-2 rounded-full bg-gray-200 overflow-hidden"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}>
-                  <div
-                    className="h-full bg-emerald-500 transition-[width] duration-200 ease-linear"
-                    style={{
-                      width:
-                        (1 -
-                          Math.max(0, nextRoundAt - Date.now()) /
-                            nextRoundDuration) *
-                          100 +
-                        "%",
-                    }}
-                    aria-valuenow={Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        (1 -
-                          Math.max(0, nextRoundAt - Date.now()) /
-                            nextRoundDuration) *
-                          100
-                      )
-                    )}
-                  />
-                </div>
-                <div className="mt-1 text-xs text-gray-500 text-right">
-                  Next hand in{" "}
-                  {(Math.max(0, nextRoundAt - Date.now()) / 1000).toFixed(1)}s
-                </div>
+                  className="h-full bg-emerald-500 transition-[width] duration-200 ease-linear"
+                  style={{
+                    width:
+                      (1 -
+                        Math.max(0, (nextRoundAt ?? 0) - Date.now()) /
+                          (nextRoundDuration ?? 1)) *
+                        100 +
+                      "%",
+                  }}
+                  aria-valuenow={Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      (1 -
+                        Math.max(0, (nextRoundAt ?? 0) - Date.now()) /
+                          (nextRoundDuration ?? 1)) *
+                        100
+                    )
+                  )}
+                />
               </div>
-            )}
+              <div className="mt-1 text-xs text-gray-500 text-right">
+                Next hand in{" "}
+                {(Math.max(0, (nextRoundAt ?? 0) - Date.now()) / 1000).toFixed(
+                  1
+                )}
+                s
+              </div>
+            </motion.div>
 
             {phase === "showdown" &&
               !championId &&
