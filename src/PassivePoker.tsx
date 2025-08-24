@@ -1035,7 +1035,11 @@ export default function PassivePoker() {
                     ? 1
                     : 0,
               }}
-              transition={{ duration: 4 }} // fade in/out over 1s
+              transition={{
+                delay: 2, // wait 1s before starting
+                duration: 5, // fade in/out over 4s
+                ease: "easeInOut",
+              }}
               style={{
                 visibility:
                   phase === "showdown" && nextRoundAt && nextRoundDuration
