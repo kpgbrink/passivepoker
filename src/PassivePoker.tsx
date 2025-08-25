@@ -975,6 +975,61 @@ export default function PassivePoker() {
           </div>
 
           <div className="relative rounded-2xl border bg-gradient-to-br from-emerald-50 to-teal-50 p-4 sm:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{
+                opacity:
+                  phase === "showdown" && nextRoundAt && nextRoundDuration
+                    ? 1
+                    : 0,
+              }}
+              transition={{
+                delay: 0, // wait 2s before starting
+                duration: 5, // fade in/out over 5s
+                ease: "easeInOut",
+              }}
+              style={{
+                visibility:
+                  phase === "showdown" && nextRoundAt && nextRoundDuration
+                    ? "visible"
+                    : "hidden",
+              }}
+              className="mt-3">
+              {(() => {
+                const timeRemaining = Math.max(
+                  0,
+                  (nextRoundAt ?? 0) - Date.now()
+                );
+                const total = Math.max(1, nextRoundDuration ?? 1); // avoid divide-by-0
+                const progress = Math.min(
+                  100,
+                  Math.max(0, (1 - timeRemaining / total) * 100)
+                );
+                // Only animate width while counting down; snap instantly when it hits 0.
+                const shouldAnimateWidth = timeRemaining > 0 && progress > 0;
+
+                return (
+                  <>
+                    <div
+                      className="w-full h-2 rounded-full bg-gray-200 overflow-hidden"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}>
+                      <div
+                        className={`h-full bg-emerald-500 ${
+                          shouldAnimateWidth
+                            ? "transition-[width] duration-200 ease-linear"
+                            : ""
+                        }`}
+                        style={{ width: `${progress}%` }}
+                        aria-valuenow={Math.round(progress)}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+
             <div className="mb-3 text-sm text-gray-600">Community</div>
             <div className="flex gap-2 sm:gap-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -1025,62 +1080,6 @@ export default function PassivePoker() {
                 Winner{lastWinners.length > 1 ? "s" : ""}:
               </span>{" "}
               {lastWinners.join(", ")}
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{
-                opacity:
-                  phase === "showdown" && nextRoundAt && nextRoundDuration
-                    ? 1
-                    : 0,
-              }}
-              transition={{
-                delay: 2, // wait 1s before starting
-                duration: 5, // fade in/out over 4s
-                ease: "easeInOut",
-              }}
-              style={{
-                visibility:
-                  phase === "showdown" && nextRoundAt && nextRoundDuration
-                    ? "visible"
-                    : "hidden",
-              }}
-              className="mt-3">
-              <div
-                className="w-full h-2 rounded-full bg-gray-200 overflow-hidden"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}>
-                <div
-                  className="h-full bg-emerald-500 transition-[width] duration-200 ease-linear"
-                  style={{
-                    width:
-                      (1 -
-                        Math.max(0, (nextRoundAt ?? 0) - Date.now()) /
-                          (nextRoundDuration ?? 1)) *
-                        100 +
-                      "%",
-                  }}
-                  aria-valuenow={Math.max(
-                    0,
-                    Math.min(
-                      100,
-                      (1 -
-                        Math.max(0, (nextRoundAt ?? 0) - Date.now()) /
-                          (nextRoundDuration ?? 1)) *
-                        100
-                    )
-                  )}
-                />
-              </div>
-              <div className="mt-1 text-xs text-gray-500 text-right">
-                Next hand in{" "}
-                {(Math.max(0, (nextRoundAt ?? 0) - Date.now()) / 1000).toFixed(
-                  1
-                )}
-                s
-              </div>
             </motion.div>
 
             {phase === "showdown" &&
