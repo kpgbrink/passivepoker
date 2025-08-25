@@ -1141,6 +1141,11 @@ export default function PassivePoker() {
                 }`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-semibold truncate">{p.name}</div>
+                  {p.lastHandName && (
+                    <div className="mt-2 text-xs text-gray-600">
+                      {p.lastHandName}
+                    </div>
+                  )}
                   <div className="text-xs text-gray-500">
                     Pts: <span className="font-semibold">{p.points}</span>
                   </div>
@@ -1172,11 +1177,6 @@ export default function PassivePoker() {
                     />
                   ))}
                 </div>
-                {p.lastHandName && (
-                  <div className="mt-2 text-xs text-gray-600">
-                    {p.lastHandName}
-                  </div>
-                )}
               </motion.div>
             ))}
           </div>
