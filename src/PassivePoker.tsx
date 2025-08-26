@@ -535,7 +535,13 @@ export default function PassivePoker() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [running, setRunning] = useState(false);
   const [round, setRound] = useState(0);
-  const [speedMs, setSpeedMs] = useState(700);
+  const [speedMult, setSpeedMult] = useState(1);
+  const baseDelayMs = 700;
+  const speedMsRef = useRef(baseDelayMs);
+  useEffect(() => {
+    // higher multiplier = faster = smaller delay
+    speedMsRef.current = Math.max(50, Math.round(baseDelayMs / speedMult));
+  }, [speedMult]);
   const [cardScale, setCardScale] = useState(1);
   const timeoutsRef = useRef<number[]>([]);
   const [lastWinners, setLastWinners] = useState<string[]>([]);
@@ -557,6 +563,63 @@ export default function PassivePoker() {
     sfx.current.set(soundOn);
     sfx.current.setVol(volume);
   }, [soundOn, volume]);
+
+  // ───────────────────────────────────────────────────────────────────────────────
+  // Queue Runner
+  // ───────────────────────────────────────────────────────────────────────────────
+  type Step = { fn: () => void; mult: number };
+
+  const stepQueueRef = useRef<Step[]>([]);
+  const queueTimerRef = useRef<number | null>(null);
+  const queueRunningRef = useRef(false);
+
+  function clearQueueTimer() {
+    if (queueTimerRef.current != null) {
+      window.clearTimeout(queueTimerRef.current);
+      queueTimerRef.current = null;
+    }
+  }
+
+  function runNextStep() {
+    const step = stepQueueRef.current.shift();
+    if (!step) {
+      queueRunningRef.current = false;
+      return;
+    }
+
+    queueRunningRef.current = true;
+
+    // Execute this step immediately…
+    step.fn();
+
+    // …then schedule the NEXT step using the *current* speed and this step's multiplier
+    const delay = Math.max(1, speedMsRef.current) * (step.mult || 1);
+    queueTimerRef.current = window.setTimeout(
+      runNextStep,
+      delay
+    ) as unknown as number;
+  }
+
+  function enqueue(fn: () => void, mult = 1) {
+    stepQueueRef.current.push({ fn, mult });
+    // If the queue was idle, start by running the first step immediately
+    if (!queueRunningRef.current) runNextStep();
+  }
+
+  function clearAll() {
+    for (const id of timeoutsRef.current) {
+      try {
+        window.clearTimeout(id);
+        window.clearInterval(id);
+      } catch {}
+    }
+    timeoutsRef.current = [];
+    clearQueueTimer();
+    stepQueueRef.current = [];
+    queueRunningRef.current = false;
+  }
+
+  //-------------------------------------------------------------------------------
 
   // Countdown state for automatic progress UI
   const [nextRoundAt, setNextRoundAt] = useState<number | null>(null);
@@ -605,19 +668,6 @@ export default function PassivePoker() {
     },
     []
   );
-  function clearAll() {
-    for (const id of timeoutsRef.current) {
-      try {
-        window.clearTimeout(id);
-        window.clearInterval(id);
-      } catch {}
-    }
-    timeoutsRef.current = [];
-  }
-  function schedule(fn: () => void, delay = speedMs) {
-    const id = window.setTimeout(fn, delay) as unknown as number;
-    timeoutsRef.current.push(id);
-  }
 
   function parseNames(input: string) {
     return Array.from(
@@ -657,7 +707,9 @@ export default function PassivePoker() {
     setChampionId(null);
     setChampionRevealAt(null);
     setChampionRevealDuration(null);
-    schedule(() => startRound(), 0);
+
+    const id = window.setTimeout(startRound, 0) as unknown as number;
+    timeoutsRef.current.push(id);
   }
 
   function startRound() {
@@ -702,18 +754,18 @@ export default function PassivePoker() {
         suitRank[b.card.suit] - suitRank[a.card.suit]
     );
 
-    steps.forEach((step, i) => {
-      schedule(() => {
+    for (const step of steps) {
+      enqueue(() => {
         setPlayers((prev) => {
           const cp = prev.map((p) => ({ ...p }));
           cp[step.pi].cards = [...(cp[step.pi].cards || []), step.card];
           return cp;
         });
         sfx.current.deal();
-      }, 100 + i * speedMs);
-    });
+      });
+    }
 
-    schedule(revealFlop, steps.length * speedMs + 350);
+    enqueue(() => revealFlop(), 2);
   }
 
   function revealFlop() {
@@ -722,7 +774,7 @@ export default function PassivePoker() {
     const flop = draw(3, deckRef.current, deckIdxRef);
     setCommunity(flop);
     sfx.current.flip();
-    schedule(() => revealTurn(), speedMs * 2);
+    enqueue(() => revealTurn(), 2);
   }
   function revealTurn() {
     setPhase("turn");
@@ -730,7 +782,7 @@ export default function PassivePoker() {
     const t = draw(1, deckRef.current, deckIdxRef)[0];
     setCommunity((p) => [...p, t]);
     sfx.current.flip();
-    schedule(() => revealRiver(), speedMs * 2);
+    enqueue(() => revealRiver(), 2);
   }
   function revealRiver() {
     setPhase("river");
@@ -738,9 +790,8 @@ export default function PassivePoker() {
     const r = draw(1, deckRef.current, deckIdxRef)[0];
     setCommunity((p) => [...p, r]);
     sfx.current.river();
-    schedule(() => showdown(), speedMs * 2);
+    enqueue(() => showdown(), 2);
   }
-
   function showdown() {
     setPhase("showdown");
     const ps = playersRef.current;
@@ -787,28 +838,36 @@ export default function PassivePoker() {
         setNextRoundAt(null);
         setNextRoundDuration(null);
         clearAll();
-        const delay = Math.max(2000, speedMs * 4); // show final hand briefly
-        setChampionRevealAt(Date.now() + delay);
-        setChampionRevealDuration(delay);
-        schedule(() => {
+
+        // show the final hand briefly; use live delay
+        const delayChamp = Math.max(2000, speedMsRef.current * 4);
+        setChampionRevealAt(Date.now() + delayChamp);
+        setChampionRevealDuration(delayChamp);
+
+        const id = window.setTimeout(() => {
           setChampionId(cid);
           setChampionRevealAt(null);
           setChampionRevealDuration(null);
-        }, delay);
+        }, delayChamp) as unknown as number;
+        timeoutsRef.current.push(id);
+
         return;
       }
     }
 
     // Otherwise continue
-    const delay = speedMs * 15;
-    setNextRoundAt(Date.now() + delay);
-    setNextRoundDuration(delay);
-    if (running)
-      schedule(() => {
+    const delayNext = speedMsRef.current * 15;
+    setNextRoundAt(Date.now() + delayNext);
+    setNextRoundDuration(delayNext);
+
+    if (running) {
+      const id = window.setTimeout(() => {
         setNextRoundAt(null);
         setNextRoundDuration(null);
         startRound();
-      }, delay);
+      }, delayNext) as unknown as number;
+      timeoutsRef.current.push(id);
+    }
   }
 
   async function onStart() {
@@ -833,15 +892,20 @@ export default function PassivePoker() {
     setChampionRevealAt(null);
     setChampionRevealDuration(null);
     setRunning(true);
-    schedule(() => startRound(), 0);
+
+    // Kick off immediately
+    startRound();
   }
+
   function continueFreePlay() {
     setUseScoreTarget(false);
     setChampionId(null);
     setChampionRevealAt(null);
     setChampionRevealDuration(null);
     setRunning(true);
-    schedule(() => startRound(), 0);
+
+    // Kick off immediately
+    startRound();
   }
 
   function pauseResume() {
@@ -852,10 +916,21 @@ export default function PassivePoker() {
       clearAll();
     } else {
       setRunning(true);
-      if (phase === "idle" || playersRef.current.length === 0) startGame();
-      else schedule(() => revealNext(), 0);
+      if (phase === "idle" || playersRef.current.length === 0) {
+        startGame();
+      } else {
+        // If you want to yield one tick to let state flush:
+        const id = window.setTimeout(
+          () => revealNext(),
+          0
+        ) as unknown as number;
+        timeoutsRef.current.push(id);
+        // Or just call directly:
+        // revealNext();
+      }
     }
   }
+
   function revealNext() {
     if (phase === "deal") revealFlop();
     else if (phase === "flop") revealTurn();
@@ -954,12 +1029,15 @@ export default function PassivePoker() {
               Speed
               <input
                 type="range"
-                min={250}
-                max={1500}
-                step={50}
-                value={speedMs}
-                onChange={(e) => setSpeedMs(+e.target.value)}
+                min={0.5}
+                max={2}
+                step={0.05}
+                value={speedMult}
+                onChange={(e) => setSpeedMult(parseFloat(e.target.value))}
               />
+              <span className="text-xs text-gray-500">
+                {speedMult.toFixed(2)}×
+              </span>
             </label>
             <label className="text-sm flex items-center gap-2">
               Card size
