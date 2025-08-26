@@ -1030,7 +1030,7 @@ export default function PassivePoker() {
               <input
                 type="range"
                 min={0.5}
-                max={2}
+                max={4}
                 step={0.05}
                 value={speedMult}
                 onChange={(e) => setSpeedMult(parseFloat(e.target.value))}
